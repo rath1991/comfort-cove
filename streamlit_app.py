@@ -1,5 +1,5 @@
 import streamlit as st
-from openai import OpenAI
+import openai
 from dotenv import load_dotenv
 import os
 
@@ -10,40 +10,59 @@ load_dotenv()
 api_key = os.getenv("API_KEY")
 base_url = os.getenv("BASE_URL")
 
-# Initialize the OpenAI Client using the credentials from the .env file
-client = OpenAI(
-    api_key=api_key,
-    base_url=base_url,
-)
+# Set OpenAI API key and base URL
+openai.api_key = api_key
+openai.api_base = base_url
+
+# Initialize conversation history in session state
+if 'conversation_history' not in st.session_state:
+    st.session_state['conversation_history'] = []  # Stores both user and bot messages
 
 # Streamlit app
 st.title("Comfort Cove")
+st.subheader("A safe space for your thoughts, where empathy meets understanding.")
 
-# Input text box
-input_text = st.text_input("Ask me anything:", placeholder="Type your message here...")
+# Display previous conversations in chat format
+for message in st.session_state['conversation_history']:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
 
-# Function to handle chatbot response streaming
-def generate_response(input_text):
-    if input_text:
-        # Display a placeholder for the streamed response
-        response_placeholder = st.empty()
+# Capture user input using the new chat input box
+if user_input := st.chat_input("Ask me anything:"):
+    # Append user's message to session state
+    st.session_state['conversation_history'].append({"role": "user", "content": user_input})
+
+    # Display user's message in chat format
+    with st.chat_message("user"):
+        st.markdown(user_input)
+
+    # Function to handle chatbot response streaming
+    with st.chat_message("assistant"):
+        response_placeholder = st.empty()  # Placeholder for streaming response
+        full_response = ""
+
+        # Prepare full conversation history as context for the bot
+        messages = [{"role": msg["role"], "content": msg["content"]} for msg in st.session_state['conversation_history']]
 
         # Create a chat completion stream
-        response_stream = client.chat.completions.create(
+        response_stream = openai.ChatCompletion.create(
             model="rath1991/llama_32_3b_ft_comfort_cove_merged",
-            messages=[{"role": "user", "content": input_text}],
+            messages=messages,  # Use entire conversation history as context
             temperature=0,
             max_tokens=500,
             stream=True,
         )
 
         # Stream the response and update the placeholder
-        full_response = ""
         for response in response_stream:
-            response_content = response.choices[0].delta.content or ""
-            full_response += response_content
-            response_placeholder.text(full_response)  # Update the placeholder with the streaming content
+            response_content = response['choices'][0]['delta'].get('content', '')
+            if response_content:
+                full_response += response_content
+                response_placeholder.markdown(full_response)
 
-# Trigger response generation when the user inputs text
-if input_text:
-    generate_response(input_text)
+        # Append bot's response to session state
+        st.session_state['conversation_history'].append({"role": "assistant", "content": full_response})
+
+        # Limit conversation history to the last 10 exchanges (5 user + 5 bot messages)
+        if len(st.session_state['conversation_history']) > 3:
+            st.session_state['conversation_history'] = st.session_state['conversation_history'][-3:]
