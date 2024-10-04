@@ -1,5 +1,7 @@
 import streamlit as st
-import openai
+from openai import OpenAI
+
+
 from dotenv import load_dotenv
 import os
 
@@ -11,8 +13,13 @@ api_key = os.getenv("API_KEY")
 base_url = os.getenv("BASE_URL")
 
 # Set OpenAI API key and base URL
-openai.api_key = api_key
-openai.api_base = base_url
+api_key = os.getenv('OPENAI_API_KEY')
+base_url = os.getenv('BASE_URL')
+client = OpenAI(
+    api_key=api_key,
+    base_url=base_url
+
+)
 
 # Initialize conversation history in session state
 if 'conversation_history' not in st.session_state:
@@ -45,7 +52,7 @@ if user_input := st.chat_input("Ask me anything:"):
         messages = [{"role": msg["role"], "content": msg["content"]} for msg in st.session_state['conversation_history']]
 
         # Create a chat completion stream
-        response_stream = openai.ChatCompletion.create(
+        response_stream = client.chat.completions.create(
             model="rath1991/llama_32_3b_ft_comfort_cove_merged",
             messages=messages,  # Use entire conversation history as context
             temperature=0,
