@@ -7,7 +7,18 @@ def generate_response(
     prompt: str,
     max_new_tokens: int = 500
 ) -> None:
-    """Generate response for a given prompt."""
+    """
+    Generate a response for a given prompt using a pre-trained language model.
+
+    Args:
+        model (PreTrainedModel): The pre-trained model used for generating text.
+        tokenizer (PreTrainedTokenizer): The tokenizer associated with the model.
+        prompt (str): The input text prompt to generate a response for.
+        max_new_tokens (int, optional): The maximum number of new tokens to generate. Defaults to 500.
+
+    Returns:
+        None: The function does not return a value. The generated text is streamed to the output.
+    """
     messages = [{"role": "user", "content": prompt}]
     
     inputs = tokenizer.apply_chat_template(

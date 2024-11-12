@@ -9,7 +9,20 @@ def train_model(
     tokenizer: PreTrainedTokenizer, 
     dataset: DatasetDict
 ) -> PreTrainedModel:
-    """Train the PEFT fine-tuned model with the given dataset."""
+    """
+    Train the Parameter Efficient Fine-Tuning (PEFT) model with the given dataset.
+
+    Args:
+        model (PreTrainedModel): The pre-trained model to be fine-tuned.
+        tokenizer (PreTrainedTokenizer): The tokenizer associated with the model.
+        dataset (DatasetDict): The dataset dictionary containing 'train' and 'test' datasets.
+
+    Returns:
+        PreTrainedModel: The fine-tuned model after training.
+
+    The function configures training arguments based on the system's support for bfloat16,
+    initializes an SFTTrainer with the model, tokenizer, and datasets, and performs the training.
+    """
     
     training_args = TrainingArguments(
         **TRAINING_CONFIG,
