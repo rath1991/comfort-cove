@@ -1,166 +1,203 @@
 
----
-
-# **Product Requirements Document – Failure Mode Prediction & ISO Mapping Tool**
+# **Product Requirements Document – RCA & Fault Tree Generation**
 
 ## **1. Overview**
 
-This product automates classification of work orders into SME-aligned failure modes and optionally maps them to ISO 14224 failure mode codes. It leverages a **three-stage LLM pipeline** (already implemented) combined with **filtered vector search** for ISO mapping. The end goal is to **accelerate SME productivity** by pre-filling failure modes and providing transparent, editable predictions.
+This feature extends the failure mode classification + ISO 14224 mapping pipeline into a **root cause analysis (RCA) system**.
+The system ingests chronological work order text, extracts evidence, generates **mini fault trees using an LLM**, scores hypotheses against evidence, and produces **root cause explanations + preventive recommendations**.
+It delivers both a **Streamlit UI for SMEs** and a **FastAPI backend** for programmatic access.
 
 ---
 
 ## **2. Objectives**
 
-* **Primary:** Classify failure modes from work order text (Short, Long, Full) in a single overnight batch run.
-* **Secondary:** Map classified failure modes to ISO 14224 codes using a two-stage LLM + filtered retrieval process.
-* **Tertiary:** Provide a **Streamlit frontend** for SMEs to:
-
-  * Review predictions
-  * Accept, edit, or reject
-  * View justifications
-  * See ISO mapping (on demand)
-  * Save changes and export
+* Ingest free-text work orders and transform them into structured evidence.
+* Generate bounded fault trees and hypotheses with reasoning LLMs.
+* Select most probable root cause(s) with transparent evidence citations.
+* Recommend practical actions and risk warnings.
+* Provide **Streamlit frontend** and **FastAPI backend endpoints** for seamless SME use and integration.
 
 ---
 
 ## **3. Functional Requirements**
 
-### **3.1 Batch Processing**
+### **3.1 Data Inputs**
 
-* Input: Excel/CSV or Google Sheet with columns:
-
-  * `wo_id`
-  * `short_desc`
-  * `long_desc`
-  * `full_text` (concatenated or all fields combined)
-* Process:
-
-  1. **Stage 1 LLM**: Predict SME-aligned failure mode + justification + normalized text
-  2. **Stage 2–4 LLM** (ISO mapping):
-
-     * Classify main equipment category
-     * Classify equipment class(es)
-     * Filter vector DB search to category + classes
-     * Retrieve top matches
-     * Select best ISO code with justification
-* Output: Enriched dataset with:
-
-  * `predicted_failure_mode`
-  * `prediction_confidence`
-  * `prediction_justification`
-  * `iso_code`
-  * `iso_confidence`
-  * `iso_justification`
+* **Work Orders dataset** (Excel/CSV/Google Sheet).
+  Fields: `wo_id`, `equipment_id`, `date`, `short_desc`, `long_desc`, `full_text`.
+* **Pipeline outputs (from 3-stage classifier):** `predicted_failure_mode`, `iso_code` (optional).
+* **Optional telemetry features:** vibration, temperature, current, trips.
 
 ---
 
-### **3.2 Frontend (Streamlit)**
+### **3.2 Pipeline Steps**
 
-#### **Main Features**
+1. **Evidence Extraction (LLM)**
 
-1. **Dataset Upload & Mapping**
+   * Extract structured facts from work order text.
+   * Fields: `id`, `date`, `symptoms[]`, `actions[]`, `outcome`, `quotes[]`.
 
-   * Upload Excel/CSV or connect Google Sheet
-   * Map columns (Short, Long, Full, etc.)
+2. **Hypothesis Generation (LLM)**
 
-2. **Review Workspace**
+   * Generate 3–5 candidate causes from a fixed **Cause Taxonomy**.
+   * Each with rationale, expected support, expected contradiction.
 
-   * Table view with filters:
+3. **Fault Tree Drafting (LLM)**
 
-     * Confidence threshold
-     * Category / Class
-     * Needs review vs accepted
-   * Row card:
+   * Build a shallow tree (max depth=2, breadth=4).
+   * Nodes reference taxonomy causes + evidence IDs.
+   * Mark unsupported nodes as `assumed:true`.
 
-     * WO Short & Long text
-     * Predicted failure mode + confidence
-     * Expandable justification
-     * ISO mapping fields (collapsed by default)
-     * Actions: Accept / Edit / Needs SME
+4. **Hypothesis Scoring**
 
-3. **Bulk Actions**
+   * Score each hypothesis (0–1) using evidence.
+   * Support vs contradiction vs assumptions.
 
-   * Auto-accept all above confidence threshold
-   * Apply one decision to multiple rows
+5. **Root Cause Selection**
 
-4. **Export**
+   * Pick top hypothesis or mark “insufficient evidence.”
 
-   * Write back to same Google Sheet (new columns appended)
-   * CSV download with all metadata
+6. **Recommendation Generation**
 
-5. **File Access**
-
-   * "View file" button to open source Excel/Sheet in a side panel or external tab
+   * 2–3 prioritized actions with rationale, expected impact, urgency.
 
 ---
 
-### **3.3 Backend Logic**
+### **3.3 FastAPI Backend**
 
-* **Batch Mode**:
+Create a separate `api.py` file with endpoints:
 
-  * Overnight cron/scheduled job runs LLM pipeline on all new rows
-  * Caches results by hashing `(full_text + prompt_version)` to avoid recomputation
-* **On-demand ISO Mapping**:
+* `POST /evidence` → Extract structured evidence from WO text.
+* `POST /hypotheses` → Generate hypotheses + fault tree from evidence.
+* `POST /score` → Score hypotheses against evidence.
+* `POST /rca` → Full pipeline: WO text → evidence → RCA JSON (root cause + recs).
+* `GET /equipment/{id}` → Retrieve RCA timeline & latest root cause for equipment.
 
-  * Only runs when SME clicks "Map to ISO" if not already populated
-* **Confidence Handling**:
-
-  * Auto-apply ≥ threshold
-  * Queue mid-confidence for SME
-  * Flag low-confidence for full review
+Responses must be in structured JSON (schema consistent with pipeline).
 
 ---
 
-### **3.4 Data Model**
+### **3.4 Streamlit Frontend**
 
-| Field                     | Type     | Notes                            |
-| ------------------------- | -------- | -------------------------------- |
-| wo\_id                    | string   | Work order ID                    |
-| short\_desc               | string   | Short description                |
-| long\_desc                | string   | Long description                 |
-| full\_text                | string   | Combined text                    |
-| predicted\_failure\_mode  | string   | LLM output                       |
-| prediction\_confidence    | float    | 0–1                              |
-| prediction\_justification | string   | LLM rationale                    |
-| iso\_code                 | string   | ISO 14224 code                   |
-| iso\_confidence           | float    | Confidence from retrieval or LLM |
-| iso\_justification        | string   | LLM rationale                    |
-| final\_failure\_mode      | string   | SME-reviewed                     |
-| final\_iso\_code          | string   | SME-reviewed                     |
-| action                    | string   | accept/edit/reject               |
-| reviewer                  | string   | SME name/ID                      |
-| timestamp                 | datetime |                                  |
+* **Dashboard**
 
----
+  * Equipment list with RCA status.
+  * Filters: equipment type, failure mode, risk level.
 
-## **4. Non-Functional Requirements**
+* **RCA Detail Page**
 
-* **Performance:** Batch run should handle ≥ 10k rows overnight
-* **Traceability:** Store prompt version & few-shot set used for each prediction
-* **Auditability:** Every export includes run ID and prompt hash
-* **Extensibility:** Easy to swap embedding model or vector DB
-* **Security:** Handle all SME review data locally or within approved infrastructure
+  * Timeline of failures (Plotly chart).
+  * RCA card: root cause, confidence, recommendations.
+  * Expandable fault tree preview.
+  * “Why?” button → evidence table with quotes.
+
+* **Review Tools**
+
+  * Accept / Edit / Reject RCA.
+  * Save SME overrides back to dataset.
+
+* **Recommendations Board**
+
+  * Aggregated preventive actions across equipment.
+  * Filters: urgency, equipment type, cause family.
 
 ---
 
-## **5. Tech Stack**
+## **4. Data Model**
 
-* **LLM:** OpenAI GPT-4o-mini (classification, ISO mapping)
-* **Embeddings:** OpenAI `text-embedding-3-large`
-* **Vector DB (local):** Chroma
-* **Frontend:** Streamlit
-* **Backend:** Python, Pandas
-* **Storage:** JSONL for ISO table, CSV/Excel for WO data
-* **Deployment:** Local or containerized (Docker)
+| Field           | Type     | Notes               |
+| --------------- | -------- | ------------------- |
+| equipment\_id   | string   | Asset ID            |
+| wo\_id          | string   | Work order ID       |
+| date            | date     | WO date             |
+| evidence        | JSON     | Extracted per WO    |
+| hypotheses      | JSON\[]  | Candidate causes    |
+| fault\_tree     | JSON     | Mini tree           |
+| root\_cause     | JSON     | Selected hypothesis |
+| recommendations | JSON\[]  | Preventive actions  |
+| confidence      | float    | 0–1                 |
+| citations       | JSON\[]  | WO IDs + quotes     |
+| sme\_override   | string   | SME RCA override    |
+| reviewer        | string   | SME name            |
+| timestamp       | datetime | Review time         |
 
-6. Constraints & Existing Components
-Three-stage LLM pipeline for ISO mapping is complete and must not be modified.
-Stage 1: Classify main equipment category from WO text.
-Stage 2: Classify equipment class(es) for that category.
-Stage 3: Filter vector DB by category + class, retrieve, and select ISO code with justification.
-The pipeline is already implemented in pipeline.py and tested with ChromaDB.
-All new product code (frontend, batch orchestration, SME review logic) will call this pipeline as a black-box function.
-Integration points:
-Input: wo_text (full, short, long combined)
-Output: dict with main_category, equipment_classes, iso_code, iso_justification.
-No refactoring or prompt changes inside the three-stage pipeline unless explicitly approved by SMEs.
+---
+
+## **5. Non-Functional Requirements**
+
+* Must process \~10k WOs in batch.
+* Every RCA must include **citations to WOs**.
+* Log all prompts and prompt versions for audit.
+* Expose structured JSON for downstream analytics.
+* LLM must never assert causes without marking them as `assumed`.
+
+---
+
+## **6. Tech Stack**
+
+* **LLM:** OpenAI GPT-4o-mini or GPT-4 for reasoning.
+* **Embeddings (optional):** OpenAI `text-embedding-3-large`.
+* **Vector DB:** Chroma (for retrieval, optional).
+* **Backend:** FastAPI, Python.
+* **Frontend:** Streamlit, Plotly.
+* **Storage:** Pandas/CSV or SQLite for persistence.
+
+---
+
+## **7. Prompts (Core)**
+
+### **Evidence Extraction**
+
+```
+Extract only facts from WORK ORDERS into JSON:
+{ id, date, symptoms[], actions[], outcome, quotes[] }.
+Do not hypothesize.
+```
+
+### **Hypothesis Generation**
+
+```
+Using EVIDENCE + TAXONOMY [list], propose 3–5 hypotheses. 
+Each with rationale, expect_support[], expect_contra[]. 
+If insufficient evidence, say so.
+```
+
+### **Fault Tree Draft**
+
+```
+Build a small fault tree for TOP EVENT = <summary>. 
+Only use causes from TAXONOMY. 
+Max depth=2, breadth=4. 
+Mark unsupported nodes as assumed:true.
+```
+
+### **Scoring & Root Cause**
+
+```
+Score each hypothesis 0..1 using ONLY EVIDENCE. 
+Return support_ids[], contra_ids[], score, notes. 
+Pick the top hypothesis or mark 'insufficient evidence'.
+```
+
+### **Recommendations**
+
+```
+From ROOT CAUSE, propose 2–3 prioritized actions. 
+Each: action, why, expected impact, priority, window_days.
+```
+
+---
+
+## **8. Constraints**
+
+* The existing **3-stage ISO classification pipeline must remain unchanged**.
+* RCA feature is **add-on only**.
+* All claims must be evidence-bound; otherwise marked `assumed` or `insufficient`.
+
+---
+
+This PRD ensures GitHub Copilot Agent will:
+
+* Build the **pipeline** (evidence → hypotheses → RCA).
+* Scaffold a **FastAPI backend (api.py)** with endpoints.
+* Build a **Streamlit frontend** for SME review.
